@@ -21,7 +21,9 @@ import {
 import {
   SensorData,
   getSensorDataByRange,
+  getLatestSensorReading,
   updateSamplingInterval,
+  getConnectionStatus,
 } from "@/lib/api";
 import {
   Droplets,
@@ -51,13 +53,42 @@ const TIME_RANGES = [
 
 export function SensorDashboard() {
   const [sensorData, setSensorData] = useState<SensorData[]>([]);
+  const [latestReading, setLatestReading] = useState<SensorData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
   const [timeRange, setTimeRange] = useState("1h");
   const [samplingInterval, setSamplingInterval] = useState(30);
 
   const fetchData = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      // Fetch latest reading first
+      try {
+        const latest = await getLatestSensorReading();
+        if (latest && !latest.message) {
+          setLatestReading({
+            temperature: latest.temperature,
+            humidity: latest.humidity,
+            ldr: latest.ldr,
+            timestamp: latest.timestamp,
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch latest reading:", err);
+      }
+
+      // Fetch connection status
+      try {
+        const connection = await getConnectionStatus();
+        setIsConnected(connection.isConnected);
+      } catch (err) {
+        console.error("Failed to fetch connection status:", err);
+      }
+
+      // Fetch historical data
       const end = new Date();
       const start = new Date();
 
@@ -81,8 +112,14 @@ export function SensorDashboard() {
 
       const data = await getSensorDataByRange(start, end);
       setSensorData(data);
+      
+      // If we have data but no latest reading was fetched, use first item
+      if (data.length > 0 && !latestReading) {
+        setLatestReading(data[0]);
+      }
     } catch (error) {
       console.error("Failed to fetch sensor data:", error);
+      setError("Failed to fetch sensor data. Make sure the backend server is running.");
     } finally {
       setLoading(false);
     }
@@ -104,26 +141,60 @@ export function SensorDashboard() {
     }
   };
 
-  const latestData = sensorData[0];
+  // Use latestReading if available, otherwise fall back to first item in sensorData
+  const latestData = latestReading || sensorData[0];
   const previousData = sensorData[1];
 
   // Calculate trends
-  const tempTrend = previousData
-    ? ((latestData?.temperature - previousData?.temperature) /
-        previousData?.temperature) *
+  const tempTrend = previousData && latestData
+    ? ((latestData.temperature - previousData.temperature) /
+        previousData.temperature) *
       100
     : 0;
 
-  const humidityTrend = previousData
-    ? ((latestData?.humidity - previousData?.humidity) /
-        previousData?.humidity) *
+  const humidityTrend = previousData && latestData
+    ? ((latestData.humidity - previousData.humidity) /
+        previousData.humidity) *
       100
     : 0;
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        Loading sensor data...
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-2"></div>
+          <p>Loading sensor data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-800 font-medium">{error}</p>
+          <p className="text-red-600 text-sm mt-2">
+            Check if the backend server is running on port 5000
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!latestData && sensorData.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center p-4">
+          <p className="text-muted-foreground font-medium mb-2">
+            No sensor data available yet
+          </p>
+          <p className="text-muted-foreground text-sm">
+            {isConnected 
+              ? "Waiting for ESP32 to send data..." 
+              : "ESP32 is not connected. Make sure it's powered on and connected to WiFi."}
+          </p>
+        </div>
       </div>
     );
   }
@@ -180,15 +251,21 @@ export function SensorDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {latestData?.temperature.toFixed(1)}°C
+              {latestData ? latestData.temperature.toFixed(1) : "0.0"}°C
             </div>
             <div className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-              {tempTrend > 0 ? (
-                <TrendingUp className="h-3 w-3 text-green-500" />
+              {previousData && latestData ? (
+                <>
+                  {tempTrend > 0 ? (
+                    <TrendingUp className="h-3 w-3 text-green-500" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3 text-red-500" />
+                  )}
+                  {Math.abs(tempTrend).toFixed(1)}% from last reading
+                </>
               ) : (
-                <TrendingDown className="h-3 w-3 text-red-500" />
+                <span>No previous reading</span>
               )}
-              {Math.abs(tempTrend).toFixed(1)}% from last reading
             </div>
           </CardContent>
         </Card>
@@ -199,15 +276,21 @@ export function SensorDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {latestData?.humidity.toFixed(1)}%
+              {latestData ? latestData.humidity.toFixed(1) : "0.0"}%
             </div>
             <div className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-              {humidityTrend > 0 ? (
-                <TrendingUp className="h-3 w-3 text-green-500" />
+              {previousData && latestData ? (
+                <>
+                  {humidityTrend > 0 ? (
+                    <TrendingUp className="h-3 w-3 text-green-500" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3 text-red-500" />
+                  )}
+                  {Math.abs(humidityTrend).toFixed(1)}% from last reading
+                </>
               ) : (
-                <TrendingDown className="h-3 w-3 text-red-500" />
+                <span>No previous reading</span>
               )}
-              {Math.abs(humidityTrend).toFixed(1)}% from last reading
             </div>
           </CardContent>
         </Card>
@@ -217,7 +300,7 @@ export function SensorDashboard() {
             <Sun className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{latestData?.ldr}</div>
+            <div className="text-2xl font-bold">{latestData ? latestData.ldr : "0"}</div>
           </CardContent>
         </Card>
       </div>
@@ -349,7 +432,7 @@ export function SensorDashboard() {
                 )}
               </div>
               <div className="text-muted-foreground">
-                Last updated: {new Date(latestData?.timestamp).toLocaleString()}
+                Last updated: {latestData ? new Date(latestData.timestamp).toLocaleString() : "Never"}
               </div>
             </div>
           </div>
