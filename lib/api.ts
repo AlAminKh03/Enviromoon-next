@@ -225,3 +225,122 @@ export async function updateSamplingInterval(
     throw error;
   }
 }
+
+export interface DeviceSettings {
+  temperatureOffset: number;
+  humidityOffset: number;
+  lightThreshold: number;
+  alertThresholds: {
+    temperature: { min: number; max: number };
+    humidity: { min: number; max: number };
+    light: { min: number; max: number };
+  };
+  autoReconnect: boolean;
+  debugMode: boolean;
+}
+
+// ✅ GET /api/device/settings - Get device settings
+export async function getDeviceSettings(): Promise<DeviceSettings> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/device/settings`);
+    if (!response.ok) {
+      throw new Error("Failed to fetch device settings");
+    }
+    return response.json();
+  } catch (error) {
+    console.error("Error fetching device settings:", error);
+    // Return default settings if fetch fails
+    return {
+      temperatureOffset: 0,
+      humidityOffset: 0,
+      lightThreshold: 512,
+      alertThresholds: {
+        temperature: { min: 10, max: 35 },
+        humidity: { min: 30, max: 80 },
+        light: { min: 0, max: 1023 },
+      },
+      autoReconnect: true,
+      debugMode: false,
+    };
+  }
+}
+
+// ✅ POST /api/sensors/temp/enable - Enable temperature/humidity readings
+export async function enableTempSensor(): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/sensors/temp/enable`, {
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to enable temperature sensor");
+    }
+    return response.json();
+  } catch (error) {
+    console.error("Error enabling temperature sensor:", error);
+    throw error;
+  }
+}
+
+// ✅ POST /api/sensors/temp/disable - Disable temperature/humidity readings
+export async function disableTempSensor(): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/sensors/temp/disable`, {
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to disable temperature sensor");
+    }
+    return response.json();
+  } catch (error) {
+    console.error("Error disabling temperature sensor:", error);
+    throw error;
+  }
+}
+
+// ✅ POST /api/sensors/light/enable - Enable light (LDR) readings
+export async function enableLightSensor(): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/sensors/light/enable`, {
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to enable light sensor");
+    }
+    return response.json();
+  } catch (error) {
+    console.error("Error enabling light sensor:", error);
+    throw error;
+  }
+}
+
+// ✅ POST /api/sensors/light/disable - Disable light (LDR) readings
+export async function disableLightSensor(): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/sensors/light/disable`, {
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to disable light sensor");
+    }
+    return response.json();
+  } catch (error) {
+    console.error("Error disabling light sensor:", error);
+    throw error;
+  }
+}

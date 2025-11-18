@@ -19,10 +19,120 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  enableTempSensor,
+  disableTempSensor,
+  enableLightSensor,
+  disableLightSensor,
+  updateSamplingInterval,
+} from "@/lib/api";
+import { useState } from "react";
+import { Thermometer, Sun } from "lucide-react";
 
 export function DeviceSettings() {
+  const [tempSensorEnabled, setTempSensorEnabled] = useState(true);
+  const [lightSensorEnabled, setLightSensorEnabled] = useState(true);
+  const [isUpdatingTemp, setIsUpdatingTemp] = useState(false);
+  const [isUpdatingLight, setIsUpdatingLight] = useState(false);
+  const [samplingInterval, setSamplingInterval] = useState(30);
+  const [isUpdatingInterval, setIsUpdatingInterval] = useState(false);
+
+  const handleTempSensorToggle = async (enabled: boolean) => {
+    try {
+      setIsUpdatingTemp(true);
+      if (enabled) {
+        await enableTempSensor();
+        setTempSensorEnabled(true);
+      } else {
+        await disableTempSensor();
+        setTempSensorEnabled(false);
+      }
+    } catch (error) {
+      console.error("Failed to toggle temperature sensor:", error);
+      // Revert state on error
+      setTempSensorEnabled(!enabled);
+    } finally {
+      setIsUpdatingTemp(false);
+    }
+  };
+
+  const handleLightSensorToggle = async (enabled: boolean) => {
+    try {
+      setIsUpdatingLight(true);
+      if (enabled) {
+        await enableLightSensor();
+        setLightSensorEnabled(true);
+      } else {
+        await disableLightSensor();
+        setLightSensorEnabled(false);
+      }
+    } catch (error) {
+      console.error("Failed to toggle light sensor:", error);
+      // Revert state on error
+      setLightSensorEnabled(!enabled);
+    } finally {
+      setIsUpdatingLight(false);
+    }
+  };
+
+  const handleSamplingIntervalChange = async () => {
+    try {
+      setIsUpdatingInterval(true);
+      await updateSamplingInterval(samplingInterval);
+    } catch (error) {
+      console.error("Failed to update sampling interval:", error);
+    } finally {
+      setIsUpdatingInterval(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
+      {/* Sensor Controls */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Sensor Controls</CardTitle>
+          <CardDescription>
+            Enable or disable individual sensors on your device
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Thermometer className="h-5 w-5 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label>Temperature & Humidity Sensor</Label>
+                <p className="text-sm text-muted-foreground">
+                  Control temperature and humidity readings
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={tempSensorEnabled}
+              onCheckedChange={handleTempSensorToggle}
+              disabled={isUpdatingTemp}
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Sun className="h-5 w-5 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label>Light Sensor (LDR)</Label>
+                <p className="text-sm text-muted-foreground">
+                  Control light level readings
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={lightSensorEnabled}
+              onCheckedChange={handleLightSensorToggle}
+              disabled={isUpdatingLight}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Device Configuration</CardTitle>
@@ -62,7 +172,24 @@ export function DeviceSettings() {
           {/* Data Collection Settings */}
           <div className="space-y-2">
             <Label>Sampling Interval (seconds)</Label>
-            <Input type="number" placeholder="30" min="1" max="3600" />
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                value={samplingInterval}
+                onChange={(e) => setSamplingInterval(Number(e.target.value))}
+                placeholder="30"
+                min="1"
+                max="3600"
+                className="flex-1"
+                disabled={isUpdatingInterval}
+              />
+              <Button
+                onClick={handleSamplingIntervalChange}
+                disabled={isUpdatingInterval}
+              >
+                {isUpdatingInterval ? "Updating..." : "Update"}
+              </Button>
+            </div>
           </div>
 
           <div className="flex items-center justify-between">

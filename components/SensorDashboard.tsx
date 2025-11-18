@@ -20,17 +20,28 @@ import {
 } from "@/components/ui/select";
 import {
   SensorData,
-  getSensorDataByRange,
-  getLatestSensorReading,
-  updateSamplingInterval,
   getConnectionStatus,
+  getDeviceSettings,
+  getLatestSensorReading,
+  getSensorDataByRange,
+  type DeviceSettings,
 } from "@/lib/api";
 import {
+  AlertTriangle,
+  CheckCircle2,
+  CloudRain,
+  CloudSun,
   Droplets,
+  Flame,
+  Heart,
+  Home,
+  Moon,
+  Snowflake,
   Sun,
   Thermometer,
   TrendingDown,
   TrendingUp,
+  Wind,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -58,13 +69,15 @@ export function SensorDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [timeRange, setTimeRange] = useState("1h");
-  const [samplingInterval, setSamplingInterval] = useState(30);
+  const [deviceSettings, setDeviceSettings] = useState<DeviceSettings | null>(
+    null
+  );
 
   const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       // Fetch latest reading first
       try {
         const latest = await getLatestSensorReading();
@@ -86,6 +99,14 @@ export function SensorDashboard() {
         setIsConnected(connection.isConnected);
       } catch (err) {
         console.error("Failed to fetch connection status:", err);
+      }
+
+      // Fetch device settings
+      try {
+        const settings = await getDeviceSettings();
+        setDeviceSettings(settings);
+      } catch (err) {
+        console.error("Failed to fetch device settings:", err);
       }
 
       // Fetch historical data
@@ -112,14 +133,16 @@ export function SensorDashboard() {
 
       const data = await getSensorDataByRange(start, end);
       setSensorData(data);
-      
+
       // If we have data but no latest reading was fetched, use first item
       if (data.length > 0 && !latestReading) {
         setLatestReading(data[0]);
       }
     } catch (error) {
       console.error("Failed to fetch sensor data:", error);
-      setError("Failed to fetch sensor data. Make sure the backend server is running.");
+      setError(
+        "Failed to fetch sensor data. Make sure the backend server is running."
+      );
     } finally {
       setLoading(false);
     }
@@ -131,14 +154,158 @@ export function SensorDashboard() {
     return () => clearInterval(interval);
   }, [timeRange]);
 
-  const handleSamplingIntervalChange = async () => {
-    try {
-      await updateSamplingInterval(samplingInterval);
-      // Refresh data after updating interval
-      fetchData();
-    } catch (error) {
-      console.error("Failed to update sampling interval:", error);
+
+  const getEnvironmentStatus = () => {
+    if (!latestReading || !deviceSettings) {
+      return {
+        status: "Unknown",
+        message: "No sensor data available",
+        color: "bg-gray-500",
+        textColor: "text-gray-700",
+        icon: AlertTriangle,
+        tips: "Make sure your device is connected and collecting data.",
+        lightLevel: "unknown" as const,
+      };
     }
+
+    const { temperature, humidity, ldr } = latestReading;
+    const { alertThresholds } = deviceSettings;
+
+    // Calculate status scores
+    const tempInRange =
+      temperature >= alertThresholds.temperature.min &&
+      temperature <= alertThresholds.temperature.max;
+    const humidityInRange =
+      humidity >= alertThresholds.humidity.min &&
+      humidity <= alertThresholds.humidity.max;
+    // Light: closer to 0 is brighter, closer to 1023 is darker
+    const lightLevel = ldr < 256 ? "bright" : ldr < 512 ? "moderate" : "dim";
+
+    // Determine overall status
+    let status: string;
+    let message: string;
+    let color: string;
+    let textColor: string;
+    let icon: React.ComponentType<{ className?: string }>;
+    let tips: string;
+
+    if (tempInRange && humidityInRange) {
+      // Perfect conditions
+      if (
+        temperature >= 20 &&
+        temperature <= 25 &&
+        humidity >= 40 &&
+        humidity <= 60
+      ) {
+        status = "Perfect";
+        message = "Your environment is perfectly balanced! 🌟";
+        color = "bg-green-500";
+        textColor = "text-green-700";
+        icon = CheckCircle2;
+        tips =
+          "Temperature and humidity are in the ideal range. Great for comfort and health!";
+      } else if (temperature >= 18 && temperature <= 22) {
+        status = "Cozy";
+        message = "Your space feels cozy and comfortable! 🏠";
+        color = "bg-green-400";
+        textColor = "text-green-700";
+        icon = Home;
+        tips =
+          "Perfect for relaxation. The temperature is just right for a cozy atmosphere.";
+      } else {
+        status = "Healthy";
+        message = "Your environment is healthy and comfortable! ✅";
+        color = "bg-green-500";
+        textColor = "text-green-700";
+        icon = Heart;
+        tips = "All parameters are within safe ranges. Keep it up!";
+      }
+    } else if (!tempInRange && !humidityInRange) {
+      // Both out of range
+      if (
+        temperature > alertThresholds.temperature.max &&
+        humidity < alertThresholds.humidity.min
+      ) {
+        status = "Hot & Dry";
+        message = "It's too hot and dry in here! 🔥";
+        color = "bg-red-500";
+        textColor = "text-red-700";
+        icon = Flame;
+        tips =
+          "Consider cooling down and adding humidity. Use a fan or AC, and a humidifier if available.";
+      } else if (
+        temperature < alertThresholds.temperature.min &&
+        humidity > alertThresholds.humidity.max
+      ) {
+        status = "Cold & Damp";
+        message = "It's too cold and humid! ❄️";
+        color = "bg-blue-500";
+        textColor = "text-blue-700";
+        icon = Snowflake;
+        tips =
+          "Warm up the space and reduce humidity. Consider heating and ventilation.";
+      } else {
+        status = "Uncomfortable";
+        message = "Multiple factors need attention";
+        color = "bg-orange-500";
+        textColor = "text-orange-700";
+        icon = AlertTriangle;
+        tips =
+          "Temperature and humidity are both outside optimal ranges. Adjust both for better comfort.";
+      }
+    } else if (!tempInRange) {
+      // Temperature out of range
+      if (temperature > alertThresholds.temperature.max) {
+        status = "Too Hot";
+        message = "It's getting too warm! 🌡️";
+        color = "bg-red-500";
+        textColor = "text-red-700";
+        icon = Flame;
+        tips =
+          "Consider opening windows, using a fan, or turning on AC to cool down.";
+      } else {
+        status = "Too Cold";
+        message = "It's a bit chilly! 🧊";
+        color = "bg-blue-500";
+        textColor = "text-blue-700";
+        icon = Snowflake;
+        tips =
+          "Warm up the space with heating or close windows to retain heat.";
+      }
+    } else {
+      // Humidity out of range
+      if (humidity < alertThresholds.humidity.min) {
+        status = "Too Dry";
+        message = "The air is too dry! 💨";
+        color = "bg-orange-400";
+        textColor = "text-orange-700";
+        icon = Wind;
+        tips =
+          "Add moisture with a humidifier, plants, or by placing water bowls around.";
+      } else {
+        status = "Too Humid";
+        message = "The air is too moist! 💧";
+        color = "bg-indigo-500";
+        textColor = "text-indigo-700";
+        icon = CloudRain;
+        tips =
+          "Improve ventilation, use a dehumidifier, or open windows to reduce moisture.";
+      }
+    }
+
+    // Add light level info to tips
+    let lightStatus = "";
+    if (lightLevel === "bright") {
+      lightStatus = " The space is well-lit.";
+    } else if (lightLevel === "moderate") {
+      lightStatus = " The lighting is moderate.";
+    } else {
+      lightStatus =
+        " The space is quite dark. Consider adding more light for better visibility.";
+    }
+    tips += lightStatus;
+
+    return { status, message, color, textColor, icon, tips, lightLevel };
   };
 
   // Use latestReading if available, otherwise fall back to first item in sensorData
@@ -146,17 +313,19 @@ export function SensorDashboard() {
   const previousData = sensorData[1];
 
   // Calculate trends
-  const tempTrend = previousData && latestData
-    ? ((latestData.temperature - previousData.temperature) /
-        previousData.temperature) *
-      100
-    : 0;
+  const tempTrend =
+    previousData && latestData
+      ? ((latestData.temperature - previousData.temperature) /
+          previousData.temperature) *
+        100
+      : 0;
 
-  const humidityTrend = previousData && latestData
-    ? ((latestData.humidity - previousData.humidity) /
-        previousData.humidity) *
-      100
-    : 0;
+  const humidityTrend =
+    previousData && latestData
+      ? ((latestData.humidity - previousData.humidity) /
+          previousData.humidity) *
+        100
+      : 0;
 
   if (loading) {
     return (
@@ -190,8 +359,8 @@ export function SensorDashboard() {
             No sensor data available yet
           </p>
           <p className="text-muted-foreground text-sm">
-            {isConnected 
-              ? "Waiting for ESP32 to send data..." 
+            {isConnected
+              ? "Waiting for ESP32 to send data..."
               : "ESP32 is not connected. Make sure it's powered on and connected to WiFi."}
           </p>
         </div>
@@ -199,17 +368,75 @@ export function SensorDashboard() {
     );
   }
 
+  const envStatus = getEnvironmentStatus();
+  const LightIcon =
+    envStatus.lightLevel === "bright"
+      ? Sun
+      : envStatus.lightLevel === "moderate"
+      ? CloudSun
+      : Moon;
+
   return (
     <div className="space-y-4">
-      {/* Controls */}
+      {/* Environment Status */}
+      {latestReading && deviceSettings && (
+        <Card className="border-2">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <envStatus.icon className={`h-5 w-5 ${envStatus.textColor}`} />
+              <CardTitle>Environment Status</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div
+              className={`${envStatus.color} text-white p-6 rounded-lg mb-4 text-center`}
+            >
+              <div className="text-3xl font-bold mb-2">{envStatus.status}</div>
+              <div className="text-sm opacity-90">{envStatus.message}</div>
+            </div>
+            <div className="bg-muted p-4 rounded-lg mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Sun className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Tips
+                </span>
+              </div>
+              <p className="text-sm">{envStatus.tips}</p>
+            </div>
+            <div className="grid grid-cols-3 gap-4 pt-4 border-t">
+              <div className="text-center">
+                <Thermometer className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
+                <div className="text-lg font-semibold">
+                  {latestReading.temperature.toFixed(1)}°C
+                </div>
+              </div>
+              <div className="text-center">
+                <Droplets className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
+                <div className="text-lg font-semibold">
+                  {latestReading.humidity.toFixed(1)}%
+                </div>
+              </div>
+              <div className="text-center">
+                <LightIcon className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
+                <div className="text-lg font-semibold">{latestReading.ldr}</div>
+                <div className="text-xs text-muted-foreground capitalize">
+                  {envStatus.lightLevel}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Time Range Selector */}
       <Card>
         <CardHeader>
-          <CardTitle>Data Controls</CardTitle>
+          <CardTitle>View Settings</CardTitle>
           <CardDescription>
-            Configure data collection and viewing settings
+            Select the time range for historical data
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
+        <CardContent>
           <div className="space-y-2">
             <Label>Time Range</Label>
             <Select value={timeRange} onValueChange={setTimeRange}>
@@ -224,20 +451,6 @@ export function SensorDashboard() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Sampling Interval (seconds)</Label>
-            <div className="flex gap-2">
-              <Input
-                type="number"
-                value={samplingInterval}
-                onChange={(e) => setSamplingInterval(Number(e.target.value))}
-                min="1"
-                max="3600"
-                className="flex-1"
-              />
-              <Button onClick={handleSamplingIntervalChange}>Update</Button>
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -300,7 +513,9 @@ export function SensorDashboard() {
             <Sun className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{latestData ? latestData.ldr : "0"}</div>
+            <div className="text-2xl font-bold">
+              {latestData ? latestData.ldr : "0"}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -432,7 +647,10 @@ export function SensorDashboard() {
                 )}
               </div>
               <div className="text-muted-foreground">
-                Last updated: {latestData ? new Date(latestData.timestamp).toLocaleString() : "Never"}
+                Last updated:{" "}
+                {latestData
+                  ? new Date(latestData.timestamp).toLocaleString()
+                  : "Never"}
               </div>
             </div>
           </div>
