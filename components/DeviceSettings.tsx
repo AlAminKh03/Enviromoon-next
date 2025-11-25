@@ -11,31 +11,45 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
-  enableTempSensor,
+  disableLightSensor,
   disableTempSensor,
   enableLightSensor,
-  disableLightSensor,
+  enableTempSensor,
+  getDeviceSettings,
+  updateCalibration,
   updateSamplingInterval,
 } from "@/lib/api";
-import { useState } from "react";
-import { Thermometer, Sun } from "lucide-react";
+import { Sparkles, Sun, Thermometer } from "lucide-react";
+import { useEffect, useState } from "react";
 
 export function DeviceSettings() {
   const [tempSensorEnabled, setTempSensorEnabled] = useState(true);
   const [lightSensorEnabled, setLightSensorEnabled] = useState(true);
   const [isUpdatingTemp, setIsUpdatingTemp] = useState(false);
   const [isUpdatingLight, setIsUpdatingLight] = useState(false);
-  const [samplingInterval, setSamplingInterval] = useState(30);
+  const [samplingInterval, setSamplingInterval] = useState("30");
   const [isUpdatingInterval, setIsUpdatingInterval] = useState(false);
+  const [temperatureOffset, setTemperatureOffset] = useState("0.0");
+  const [humidityOffset, setHumidityOffset] = useState("0.0");
+  const [lightThreshold, setLightThreshold] = useState("512");
+  const [isUpdatingCalibration, setIsUpdatingCalibration] = useState(false);
+
+  // Load device settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await getDeviceSettings();
+        setTemperatureOffset(settings.temperatureOffset.toString());
+        setHumidityOffset(settings.humidityOffset.toString());
+        setLightThreshold(settings.lightThreshold.toString());
+      } catch (error) {
+        console.error("Failed to load device settings:", error);
+      }
+    };
+    loadSettings();
+  }, []);
 
   const handleTempSensorToggle = async (enabled: boolean) => {
     try {
@@ -76,9 +90,13 @@ export function DeviceSettings() {
   };
 
   const handleSamplingIntervalChange = async () => {
+    const intervalValue = parseInt(samplingInterval);
+    if (!samplingInterval || isNaN(intervalValue) || intervalValue < 1) {
+      return; // Don't update if empty or invalid
+    }
     try {
       setIsUpdatingInterval(true);
-      await updateSamplingInterval(samplingInterval);
+      await updateSamplingInterval(intervalValue);
     } catch (error) {
       console.error("Failed to update sampling interval:", error);
     } finally {
@@ -86,22 +104,49 @@ export function DeviceSettings() {
     }
   };
 
+  const handleCalibrationUpdate = async () => {
+    try {
+      setIsUpdatingCalibration(true);
+      await updateCalibration(
+        parseFloat(temperatureOffset) || 0,
+        parseFloat(humidityOffset) || 0,
+        parseInt(lightThreshold) || 512
+      );
+    } catch (error) {
+      console.error("Failed to update calibration:", error);
+    } finally {
+      setIsUpdatingCalibration(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Sensor Controls */}
-      <Card>
+      <Card className="relative opacity-75">
         <CardHeader>
-          <CardTitle>Sensor Controls</CardTitle>
-          <CardDescription>
-            Enable or disable individual sensors on your device
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                Sensor Controls
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-purple-500/10 to-pink-500/10 px-2.5 py-0.5 text-xs font-medium text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800">
+                  <Sparkles className="h-3 w-3" />
+                  Upcoming
+                </span>
+              </CardTitle>
+              <CardDescription>
+                Enable or disable individual sensors on your device
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between opacity-60">
             <div className="flex items-center gap-3">
               <Thermometer className="h-5 w-5 text-muted-foreground" />
               <div className="space-y-0.5">
-                <Label>Temperature & Humidity Sensor</Label>
+                <Label className="text-muted-foreground">
+                  Temperature & Humidity Sensor
+                </Label>
                 <p className="text-sm text-muted-foreground">
                   Control temperature and humidity readings
                 </p>
@@ -109,16 +154,19 @@ export function DeviceSettings() {
             </div>
             <Switch
               checked={tempSensorEnabled}
-              onCheckedChange={handleTempSensorToggle}
-              disabled={isUpdatingTemp}
+              onCheckedChange={() => {}}
+              disabled={true}
+              className="cursor-not-allowed"
             />
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between opacity-60">
             <div className="flex items-center gap-3">
               <Sun className="h-5 w-5 text-muted-foreground" />
               <div className="space-y-0.5">
-                <Label>Light Sensor (LDR)</Label>
+                <Label className="text-muted-foreground">
+                  Light Sensor (LDR)
+                </Label>
                 <p className="text-sm text-muted-foreground">
                   Control light level readings
                 </p>
@@ -126,8 +174,9 @@ export function DeviceSettings() {
             </div>
             <Switch
               checked={lightSensorEnabled}
-              onCheckedChange={handleLightSensorToggle}
-              disabled={isUpdatingLight}
+              onCheckedChange={() => {}}
+              disabled={true}
+              className="cursor-not-allowed"
             />
           </div>
         </CardContent>
@@ -135,48 +184,23 @@ export function DeviceSettings() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Device Configuration</CardTitle>
+          <CardTitle>Data Collection</CardTitle>
           <CardDescription>
-            Configure your EnviroMoon device settings
+            Configure how often the device collects sensor readings
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Connection Settings */}
-          <div className="space-y-2">
-            <Label>Serial Port</Label>
-            <Select defaultValue="COM3">
-              <SelectTrigger>
-                <SelectValue placeholder="Select port" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="COM3">COM3</SelectItem>
-                <SelectItem value="COM4">COM4</SelectItem>
-                <SelectItem value="COM5">COM5</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Baud Rate</Label>
-            <Select defaultValue="9600">
-              <SelectTrigger>
-                <SelectValue placeholder="Select baud rate" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="9600">9600</SelectItem>
-                <SelectItem value="115200">115200</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Data Collection Settings */}
           <div className="space-y-2">
             <Label>Sampling Interval (seconds)</Label>
+            <p className="text-sm text-muted-foreground">
+              How often the device takes a reading. Lower values = more frequent
+              readings but more battery/data usage.
+            </p>
             <div className="flex gap-2">
               <Input
                 type="number"
                 value={samplingInterval}
-                onChange={(e) => setSamplingInterval(Number(e.target.value))}
+                onChange={(e) => setSamplingInterval(e.target.value)}
                 placeholder="30"
                 min="1"
                 max="3600"
@@ -191,57 +215,91 @@ export function DeviceSettings() {
               </Button>
             </div>
           </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Auto-reconnect</Label>
-              <p className="text-sm text-muted-foreground">
-                Automatically reconnect if connection is lost
-              </p>
-            </div>
-            <Switch />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Debug Mode</Label>
-              <p className="text-sm text-muted-foreground">
-                Enable detailed logging for troubleshooting
-              </p>
-            </div>
-            <Switch />
-          </div>
         </CardContent>
-        <CardFooter className="flex justify-between">
-          <Button variant="outline">Reset to Defaults</Button>
-          <Button>Save Changes</Button>
-        </CardFooter>
       </Card>
 
       {/* Calibration Card */}
-      <Card>
+      <Card className="relative opacity-75">
         <CardHeader>
-          <CardTitle>Sensor Calibration</CardTitle>
-          <CardDescription>
-            Calibrate your sensors for accurate readings
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                Sensor Calibration
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-purple-500/10 to-pink-500/10 px-2.5 py-0.5 text-xs font-medium text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800">
+                  <Sparkles className="h-3 w-3" />
+                  Upcoming
+                </span>
+              </CardTitle>
+              <CardDescription>
+                Adjust sensor readings if they're consistently off. Use positive
+                values to increase readings, negative to decrease.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Temperature Offset (°C)</Label>
-            <Input type="number" placeholder="0.0" step="0.1" />
+          <div className="space-y-2 opacity-60">
+            <Label className="text-muted-foreground">
+              Temperature Offset (°C)
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              Add or subtract from temperature readings. Example: +2.5 adds
+              2.5°C to all readings.
+            </p>
+            <Input
+              type="number"
+              value={temperatureOffset}
+              onChange={() => {}}
+              placeholder="0.0"
+              step="0.1"
+              disabled={true}
+              className="cursor-not-allowed"
+            />
           </div>
-          <div className="space-y-2">
-            <Label>Humidity Offset (%)</Label>
-            <Input type="number" placeholder="0.0" step="0.1" />
+          <div className="space-y-2 opacity-60">
+            <Label className="text-muted-foreground">Humidity Offset (%)</Label>
+            <p className="text-sm text-muted-foreground">
+              Add or subtract from humidity readings. Example: -5 subtracts 5%
+              from all readings.
+            </p>
+            <Input
+              type="number"
+              value={humidityOffset}
+              onChange={() => {}}
+              placeholder="0.0"
+              step="0.1"
+              disabled={true}
+              className="cursor-not-allowed"
+            />
           </div>
-          <div className="space-y-2">
-            <Label>Light Sensor Threshold</Label>
-            <Input type="number" placeholder="512" min="0" max="1023" />
+          <div className="space-y-2 opacity-60">
+            <Label className="text-muted-foreground">
+              Light Sensor Threshold
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              Threshold value for light sensor (0-1023). Lower values = more
+              sensitive to light.
+            </p>
+            <Input
+              type="number"
+              value={lightThreshold}
+              onChange={() => {}}
+              placeholder="512"
+              min="0"
+              max="1023"
+              disabled={true}
+              className="cursor-not-allowed"
+            />
           </div>
         </CardContent>
         <CardFooter>
-          <Button className="w-full">Calibrate Sensors</Button>
+          <Button
+            className="w-full cursor-not-allowed"
+            onClick={() => {}}
+            disabled={true}
+          >
+            Update Calibration
+          </Button>
         </CardFooter>
       </Card>
     </div>

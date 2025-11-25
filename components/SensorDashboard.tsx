@@ -9,7 +9,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -23,7 +22,7 @@ import {
   getConnectionStatus,
   getDeviceSettings,
   getLatestSensorReading,
-  getSensorDataByRange,
+  getSensorHistory,
   type DeviceSettings,
 } from "@/lib/api";
 import {
@@ -55,28 +54,48 @@ import {
 } from "recharts";
 
 const TIME_RANGES = [
+  { label: "Last 1 Minute", value: "1m" },
+  { label: "Last 5 Minutes", value: "5m" },
+  { label: "Last 15 Minutes", value: "15m" },
+  { label: "Last 30 Minutes", value: "30m" },
   { label: "Last Hour", value: "1h" },
   { label: "Last 6 Hours", value: "6h" },
-  { label: "Last 24 Hours", value: "24h" },
-  { label: "Last Week", value: "7d" },
+  { label: "Last 12 Hours", value: "12h" },
+  { label: "Last 24 Hours", value: "1d" },
+  { label: "Last 3 Days", value: "3d" },
+  { label: "Last Week", value: "1w" },
   { label: "Last Month", value: "30d" },
 ];
 
 export function SensorDashboard() {
   const [sensorData, setSensorData] = useState<SensorData[]>([]);
   const [latestReading, setLatestReading] = useState<SensorData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [timeRange, setTimeRange] = useState("1h");
+  const [timeRange, setTimeRange] = useState("30m");
+  const [historyMetadata, setHistoryMetadata] = useState<{
+    count: number;
+    startTime: string;
+    endTime: string;
+    period: string;
+  } | null>(null);
   const [deviceSettings, setDeviceSettings] = useState<DeviceSettings | null>(
     null
   );
+  const [selectedMetric, setSelectedMetric] = useState<
+    "all" | "temperature" | "humidity" | "light"
+  >("all");
 
-  const fetchData = async () => {
+  const fetchData = async (isInitial = false) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (isInitial) {
+        setIsInitialLoading(true);
+        setError(null); // Only clear error on initial load
+      } else {
+        setIsRefreshing(true);
+      }
 
       // Fetch latest reading first
       try {
@@ -91,6 +110,10 @@ export function SensorDashboard() {
         }
       } catch (err) {
         console.error("Failed to fetch latest reading:", err);
+        // Only set error on initial load
+        if (isInitial) {
+          setError("Failed to fetch latest reading");
+        }
       }
 
       // Fetch connection status
@@ -109,51 +132,73 @@ export function SensorDashboard() {
         console.error("Failed to fetch device settings:", err);
       }
 
-      // Fetch historical data
-      const end = new Date();
-      const start = new Date();
+      // Fetch historical data using new history endpoint
+      try {
+        const historyResponse = await getSensorHistory(timeRange);
+        setSensorData(historyResponse.data);
 
-      switch (timeRange) {
-        case "1h":
-          start.setHours(start.getHours() - 1);
-          break;
-        case "6h":
-          start.setHours(start.getHours() - 6);
-          break;
-        case "24h":
-          start.setHours(start.getHours() - 24);
-          break;
-        case "7d":
-          start.setDate(start.getDate() - 7);
-          break;
-        case "30d":
-          start.setDate(start.getDate() - 30);
-          break;
-      }
+        // Store metadata for display
+        setHistoryMetadata({
+          count: historyResponse.count,
+          startTime: historyResponse.startTime,
+          endTime: historyResponse.endTime,
+          period: historyResponse.period,
+        });
 
-      const data = await getSensorDataByRange(start, end);
-      setSensorData(data);
+        // Clear error if we successfully fetched data
+        if (error) {
+          setError(null);
+        }
 
-      // If we have data but no latest reading was fetched, use first item
-      if (data.length > 0 && !latestReading) {
-        setLatestReading(data[0]);
+        // If we have data but no latest reading was fetched, use first item
+        if (historyResponse.data.length > 0) {
+          // Use the most recent reading from history if we don't have a latest reading
+          // Use functional update to avoid stale closure
+          setLatestReading((currentLatest) => {
+            if (
+              !currentLatest ||
+              new Date(historyResponse.data[0].timestamp) >
+                new Date(currentLatest.timestamp)
+            ) {
+              return historyResponse.data[0];
+            }
+            return currentLatest;
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch historical data:", err);
+        // Only set error on initial load, don't block UI on refresh failures
+        if (isInitial) {
+          setError(
+            "Failed to fetch sensor data. Make sure the backend server is running."
+          );
+        }
       }
     } catch (error) {
       console.error("Failed to fetch sensor data:", error);
-      setError(
-        "Failed to fetch sensor data. Make sure the backend server is running."
-      );
+      // Only set error on initial load
+      if (isInitial) {
+        setError(
+          "Failed to fetch sensor data. Make sure the backend server is running."
+        );
+      }
     } finally {
-      setLoading(false);
+      if (isInitial) {
+        setIsInitialLoading(false);
+      } else {
+        setIsRefreshing(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
+    // Reset to initial loading when timeRange changes
+    setIsInitialLoading(true);
+    fetchData(true); // Initial load
+    const interval = setInterval(() => fetchData(false), 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeRange]);
-
 
   const getEnvironmentStatus = () => {
     if (!latestReading || !deviceSettings) {
@@ -178,8 +223,8 @@ export function SensorDashboard() {
     const humidityInRange =
       humidity >= alertThresholds.humidity.min &&
       humidity <= alertThresholds.humidity.max;
-    // Light: closer to 0 is brighter, closer to 1023 is darker
-    const lightLevel = ldr < 256 ? "bright" : ldr < 512 ? "moderate" : "dim";
+    // Light: 0 means dark, higher values (closer to 1023) mean brighter
+    const lightLevel = ldr > 768 ? "bright" : ldr > 256 ? "moderate" : "dim";
 
     // Determine overall status
     let status: string;
@@ -327,7 +372,7 @@ export function SensorDashboard() {
         100
       : 0;
 
-  if (loading) {
+  if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
@@ -431,26 +476,65 @@ export function SensorDashboard() {
       {/* Time Range Selector */}
       <Card>
         <CardHeader>
-          <CardTitle>View Settings</CardTitle>
-          <CardDescription>
-            Select the time range for historical data
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>View Settings</CardTitle>
+              <CardDescription>
+                Select the time range for historical data
+              </CardDescription>
+            </div>
+            {isRefreshing && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                <span>Updating...</span>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
-            <Label>Time Range</Label>
-            <Select value={timeRange} onValueChange={setTimeRange}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select time range" />
-              </SelectTrigger>
-              <SelectContent>
-                {TIME_RANGES.map((range) => (
-                  <SelectItem key={range.value} value={range.value}>
-                    {range.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Time Range</Label>
+              <Select value={timeRange} onValueChange={setTimeRange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select time range" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIME_RANGES.map((range) => (
+                    <SelectItem key={range.value} value={range.value}>
+                      {range.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {historyMetadata && (
+              <div className="pt-2 border-t space-y-1">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Data Points:</span>
+                  <span className="font-medium">
+                    {historyMetadata.count.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Time Range:</span>
+                  <span className="font-medium text-right">
+                    {new Date(historyMetadata.startTime).toLocaleTimeString()} -{" "}
+                    {new Date(historyMetadata.endTime).toLocaleTimeString()}
+                  </span>
+                </div>
+                {sensorData.length > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      Latest Reading:
+                    </span>
+                    <span className="font-medium">
+                      {new Date(sensorData[0].timestamp).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -525,8 +609,47 @@ export function SensorDashboard() {
         <CardHeader>
           <CardTitle>Sensor History</CardTitle>
           <CardDescription>
-            Environmental data from the last {sensorData.length} readings
+            {historyMetadata
+              ? `Environmental data: ${historyMetadata.count.toLocaleString()} readings from ${
+                  TIME_RANGES.find(
+                    (r) => r.value === timeRange
+                  )?.label.toLowerCase() || timeRange
+                }`
+              : `Environmental data from ${sensorData.length} readings`}
           </CardDescription>
+          <div className="flex flex-wrap gap-2 mt-4">
+            <Button
+              variant={selectedMetric === "all" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedMetric("all")}
+            >
+              All
+            </Button>
+            <Button
+              variant={selectedMetric === "temperature" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedMetric("temperature")}
+            >
+              <Thermometer className="h-4 w-4 mr-2" />
+              Temperature
+            </Button>
+            <Button
+              variant={selectedMetric === "humidity" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedMetric("humidity")}
+            >
+              <Droplets className="h-4 w-4 mr-2" />
+              Humidity
+            </Button>
+            <Button
+              variant={selectedMetric === "light" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedMetric("light")}
+            >
+              <Sun className="h-4 w-4 mr-2" />
+              Light
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
@@ -568,31 +691,48 @@ export function SensorDashboard() {
                 tickMargin={8}
                 tickFormatter={(time) => new Date(time).toLocaleTimeString()}
               />
-              <YAxis
-                yAxisId="left"
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                domain={[0, 100]}
-                label={{
-                  value: "Temperature (°C) / Humidity (%)",
-                  angle: -90,
-                  position: "insideLeft",
-                }}
-              />
-              <YAxis
-                yAxisId="right"
-                orientation="right"
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                domain={[0, 1023]}
-                label={{
-                  value: "Light Level",
-                  angle: 90,
-                  position: "insideRight",
-                }}
-              />
+              {(selectedMetric === "all" ||
+                selectedMetric === "temperature" ||
+                selectedMetric === "humidity") && (
+                <YAxis
+                  yAxisId="left"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  domain={
+                    selectedMetric === "temperature"
+                      ? ["auto", "auto"]
+                      : selectedMetric === "humidity"
+                      ? [0, 100]
+                      : [0, 100]
+                  }
+                  label={{
+                    value:
+                      selectedMetric === "temperature"
+                        ? "Temperature (°C)"
+                        : selectedMetric === "humidity"
+                        ? "Humidity (%)"
+                        : "Temperature (°C) / Humidity (%)",
+                    angle: -90,
+                    position: "insideLeft",
+                  }}
+                />
+              )}
+              {(selectedMetric === "all" || selectedMetric === "light") && (
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  domain={[0, 1023]}
+                  label={{
+                    value: "Light Level",
+                    angle: 90,
+                    position: "insideRight",
+                  }}
+                />
+              )}
               <Tooltip
                 labelFormatter={(label) => new Date(label).toLocaleString()}
                 contentStyle={{
@@ -601,36 +741,43 @@ export function SensorDashboard() {
                   borderRadius: "var(--radius)",
                 }}
               />
-              <Area
-                yAxisId="left"
-                type="monotone"
-                dataKey="temperature"
-                name="Temperature (°C)"
-                stroke="#ff6b6b"
-                fill="url(#temperatureGradient)"
-                fillOpacity={1}
-                strokeWidth={2}
-              />
-              <Area
-                yAxisId="left"
-                type="monotone"
-                dataKey="humidity"
-                name="Humidity (%)"
-                stroke="#4dabf7"
-                fill="url(#humidityGradient)"
-                fillOpacity={1}
-                strokeWidth={2}
-              />
-              <Area
-                yAxisId="right"
-                type="monotone"
-                dataKey="ldr"
-                name="Light Level"
-                stroke="#ffd43b"
-                fill="url(#lightGradient)"
-                fillOpacity={1}
-                strokeWidth={2}
-              />
+              {(selectedMetric === "all" ||
+                selectedMetric === "temperature") && (
+                <Area
+                  yAxisId="left"
+                  type="monotone"
+                  dataKey="temperature"
+                  name="Temperature (°C)"
+                  stroke="#ff6b6b"
+                  fill="url(#temperatureGradient)"
+                  fillOpacity={1}
+                  strokeWidth={2}
+                />
+              )}
+              {(selectedMetric === "all" || selectedMetric === "humidity") && (
+                <Area
+                  yAxisId="left"
+                  type="monotone"
+                  dataKey="humidity"
+                  name="Humidity (%)"
+                  stroke="#4dabf7"
+                  fill="url(#humidityGradient)"
+                  fillOpacity={1}
+                  strokeWidth={2}
+                />
+              )}
+              {(selectedMetric === "all" || selectedMetric === "light") && (
+                <Area
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="ldr"
+                  name="Light Level"
+                  stroke="#ffd43b"
+                  fill="url(#lightGradient)"
+                  fillOpacity={1}
+                  strokeWidth={2}
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         </CardContent>

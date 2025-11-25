@@ -55,6 +55,14 @@ export interface Alert {
   timestamp: string;
 }
 
+export interface SensorHistoryResponse {
+  period: string;
+  startTime: string;
+  endTime: string;
+  count: number;
+  data: SensorData[];
+}
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
@@ -106,6 +114,29 @@ export async function getSensorDataByRange(
     return response.json();
   } catch (error) {
     console.error("Error fetching sensor data range:", error);
+    throw error;
+  }
+}
+
+// ✅ GET /api/sensors/history - Fetch sensor data for a specific time period
+export async function getSensorHistory(
+  period: string,
+  limit?: number
+): Promise<SensorHistoryResponse> {
+  try {
+    const params = new URLSearchParams({
+      period,
+      ...(limit && { limit: limit.toString() }),
+    });
+
+    const response = await fetch(`${API_BASE_URL}/sensors/history?${params}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: "Failed to fetch sensor history" }));
+      throw new Error(error.error || "Failed to fetch sensor history");
+    }
+    return response.json();
+  } catch (error) {
+    console.error("Error fetching sensor history:", error);
     throw error;
   }
 }
@@ -341,6 +372,42 @@ export async function disableLightSensor(): Promise<{
     return response.json();
   } catch (error) {
     console.error("Error disabling light sensor:", error);
+    throw error;
+  }
+}
+
+// ✅ POST /api/device/calibration - Update sensor calibration
+export async function updateCalibration(
+  temperatureOffset?: number,
+  humidityOffset?: number,
+  lightThreshold?: number
+): Promise<{ success: boolean; settings: DeviceSettings }> {
+  try {
+    const body: any = {};
+    if (temperatureOffset !== undefined) {
+      body.temperatureOffset = temperatureOffset;
+    }
+    if (humidityOffset !== undefined) {
+      body.humidityOffset = humidityOffset;
+    }
+    if (lightThreshold !== undefined) {
+      body.lightThreshold = lightThreshold;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/device/calibration`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to update calibration");
+    }
+    return response.json();
+  } catch (error) {
+    console.error("Error updating calibration:", error);
     throw error;
   }
 }
