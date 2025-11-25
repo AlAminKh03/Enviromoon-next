@@ -179,7 +179,7 @@ export function SensorDashboard() {
       // Only set error on initial load
       if (isInitial) {
         setError(
-          "Failed to fetch sensor data. Make sure the backend server is running."
+          "Failed to fetch sensor data. Please check your API connection."
         );
       }
     } finally {
@@ -389,7 +389,8 @@ export function SensorDashboard() {
         <div className="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-red-800 font-medium">{error}</p>
           <p className="text-red-600 text-sm mt-2">
-            Check if the backend server is running on port 5000
+            Please verify your API URL is correctly configured and the backend
+            is accessible.
           </p>
         </div>
       </div>

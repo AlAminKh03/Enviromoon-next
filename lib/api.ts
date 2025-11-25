@@ -63,8 +63,17 @@ export interface SensorHistoryResponse {
   data: SensorData[];
 }
 
+// API Base URL - Set NEXT_PUBLIC_API_URL environment variable or replace the default URL
+// IMPORTANT: Check your backend structure:
+// - If endpoints are at root: https://enviromoon-node.vercel.app/sensors/history → use: "https://enviromoon-node.vercel.app"
+// - If endpoints are under /api: https://enviromoon-node.vercel.app/api/sensors/history → use: "https://enviromoon-node.vercel.app/api"
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+  process.env.NEXT_PUBLIC_API_URL || "https://enviromoon-node.vercel.app/api";
+
+// Log API URL for debugging
+if (typeof window !== "undefined") {
+  console.log("🌐 API Base URL:", API_BASE_URL);
+}
 
 // ✅ GET /api/sensors - Fetch latest sensor data (last 10 readings)
 export async function getLatestSensorData(): Promise<SensorData[]> {
@@ -129,14 +138,46 @@ export async function getSensorHistory(
       ...(limit && { limit: limit.toString() }),
     });
 
-    const response = await fetch(`${API_BASE_URL}/sensors/history?${params}`);
+    const url = `${API_BASE_URL}/sensors/history?${params}`;
+    console.log("🔍 Fetching:", url);
+
+    const response = await fetch(url);
+
+    console.log("📡 Response status:", response.status, response.statusText);
+
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: "Failed to fetch sensor history" }));
-      throw new Error(error.error || "Failed to fetch sensor history");
+      const errorText = await response.text();
+      console.error("❌ API Error Response:", errorText);
+
+      let error;
+      try {
+        error = JSON.parse(errorText);
+      } catch {
+        error = {
+          error: errorText || `HTTP ${response.status}: ${response.statusText}`,
+        };
+      }
+
+      const errorMessage =
+        error.error || `Failed to fetch sensor history (${response.status})`;
+      console.error("API Error:", errorMessage, "URL:", url);
+      throw new Error(errorMessage);
     }
-    return response.json();
+
+    const data = await response.json();
+    console.log(
+      "✅ Successfully fetched sensor history:",
+      data.count,
+      "records"
+    );
+    return data;
   } catch (error) {
-    console.error("Error fetching sensor history:", error);
+    console.error("❌ Error fetching sensor history:", error);
+    if (error instanceof TypeError && error.message.includes("fetch")) {
+      throw new Error(
+        `Network error: Unable to reach API at ${API_BASE_URL}. Please check your API URL configuration and CORS settings.`
+      );
+    }
     throw error;
   }
 }
